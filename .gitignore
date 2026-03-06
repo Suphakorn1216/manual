@@ -1,6 +1,19 @@
+# ROS2 build artifacts (root หรือใน workspace)
 build/
 install/
 log/
-.vscode/
-*.pyc
+
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# Python
 __pycache__/
+*.pyc
+
+# Bags
+*.bag*
+
+# Editor/OS
+.vscode/
+.DS_Store
