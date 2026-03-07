@@ -2,6 +2,7 @@
 
 # ---- ROS2 Environment ----
 source /opt/ros/humble/setup.bash
+source ~/turtlebot3_ws/install/setup.bash
 export ROS_DOMAIN_ID=7
 export TURTLEBOT3_MODEL=burger
 
