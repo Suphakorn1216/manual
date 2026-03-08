@@ -1,98 +1,86 @@
-import math
-
 import rclpy
 from rclpy.node import Node
-
-from sensor_msgs.msg import Imu
-from geometry_msgs.msg import Twist
 from turtlebot3_msgs.msg import SensorState
+from geometry_msgs.msg import Twist
+import math
 
 
-class VWPublisher(Node):
+class OdomCalculator(Node):
     def __init__(self):
-        super().__init__('vw_publisher')
+        super().__init__('odom_calculator')
+        
+        self.L = 0.160
+        self.R = 0.033
+        self.RESOLUTION = 4096
+        
+        self.prev_left_ticks = 0
+        self.prev_right_ticks = 0
+        self.prev_time = self.get_clock().now()
+        self.first_run = True
 
-        self.sensor_sub = self.create_subscription(
+        self.subscription = self.create_subscription(
             SensorState,
             '/sensor_state',
-            self.sensor_callback,
+            self.sensor_state_callback,
             10
         )
 
-        self.imu_sub = self.create_subscription(
-            Imu,
-            '/imu',
-            self.imu_callback,
-            10
-        )
-
-        self.vw_pub = self.create_publisher(
+        self.publisher = self.create_publisher(
             Twist,
             '/vw_est',
             10
         )
 
-        self.timer = self.create_timer(0.02, self.timer_callback)
-
-        self.wheel_radius = 0.033
-        self.encoder_resolution = 4096.0
-
-        self.left_encoder = None
-        self.right_encoder = None
-        self.prev_left_encoder = None
-        self.prev_right_encoder = None
-
-        self.omega_imu = 0.0
-        self.last_time = self.get_clock().now()
-
-    def sensor_callback(self, msg):
-        self.left_encoder = msg.left_encoder
-        self.right_encoder = msg.right_encoder
-
-    def imu_callback(self, msg):
-        self.omega_imu = msg.angular_velocity.z
-
-    def timer_callback(self):
-        if self.left_encoder is None or self.right_encoder is None:
-            return
-
-        if self.prev_left_encoder is None:
-            self.prev_left_encoder = self.left_encoder
-            self.prev_right_encoder = self.right_encoder
-            self.last_time = self.get_clock().now()
-            return
-
+    def sensor_state_callback(self, msg):
         current_time = self.get_clock().now()
-        dt = (current_time - self.last_time).nanoseconds / 1e9
-
-        if dt <= 0.0:
+        dt = (current_time - self.prev_time).nanoseconds / 1e9
+        
+        if dt <= 0:
             return
 
-        delta_left = self.left_encoder - self.prev_left_encoder
-        delta_right = self.right_encoder - self.prev_right_encoder
+        if dt < 0.01:
+            return
 
-        ds_left = 2.0 * math.pi * self.wheel_radius * delta_left / self.encoder_resolution
-        ds_right = 2.0 * math.pi * self.wheel_radius * delta_right / self.encoder_resolution
+        curr_left_ticks = msg.left_encoder
+        curr_right_ticks = msg.right_encoder
 
-        v = (ds_right + ds_left) / (2.0 * dt)
-        omega = self.omega_imu
+        if self.first_run:
+            self.prev_left_ticks = curr_left_ticks
+            self.prev_right_ticks = curr_right_ticks
+            self.prev_time = current_time
+            self.first_run = False
+            return
+
+        d_ticks_l = curr_left_ticks - self.prev_left_ticks
+        d_ticks_r = curr_right_ticks - self.prev_right_ticks
+
+        ds_l = (2 * math.pi * self.R * d_ticks_l) / self.RESOLUTION
+        ds_r = (2 * math.pi * self.R * d_ticks_r) / self.RESOLUTION
+
+        v = ((ds_r + ds_l) / 2) / dt
+        w = ((ds_r - ds_l) / self.L) / dt
 
         twist = Twist()
         twist.linear.x = v
-        twist.angular.z = omega
-        self.vw_pub.publish(twist)
+        twist.angular.z = w
+        self.publisher.publish(twist)
 
-        self.get_logger().info(f'v = {v:.4f} m/s, omega = {omega:.4f} rad/s')
+        self.get_logger().info(
+            f'Linear Velocity (v): {v:.3f} m/s, Angular Velocity (w): {w:.3f} rad/s'
+        )
 
-        self.prev_left_encoder = self.left_encoder
-        self.prev_right_encoder = self.right_encoder
-        self.last_time = current_time
+        self.prev_left_ticks = curr_left_ticks
+        self.prev_right_ticks = curr_right_ticks
+        self.prev_time = current_time
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = VWPublisher()
-    rclpy.spin(node)
+    node = OdomCalculator()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     node.destroy_node()
     rclpy.shutdown()
 
